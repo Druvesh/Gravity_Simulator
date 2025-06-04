@@ -7,7 +7,7 @@ Left Click + Drag – Set position & velocity for new body
 
 Right Click – Clear all spawned bodies
 
-+ / - – Increase/decrease mass for new bodies
+(+ or -) – Increase/decrease mass for new bodies
 
 Space – Pause/Resume
 
