@@ -2,7 +2,7 @@ import pygame
 import math
 import random
 
-WIDTH, HEIGHT = 800, 600
+WIDTH, HEIGHT = 1100, 800
 WINDOW_TITLE = "Gravity Simulator"
 FPS = 60
 SCALED_G = 2000
