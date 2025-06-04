@@ -2,14 +2,15 @@ import pygame
 import math
 import random
 
-WIDTH, HEIGHT = 1100, 800
+WIDTH, HEIGHT = 1400, 800
 WINDOW_TITLE = "Gravity Simulator"
 FPS = 60
 SCALED_G = 2000
 TIME_STEP = 0.1
-MIN_DISTANCE = 10
+MIN_DISTANCE_FORCE_CAP = 10
 MAX_VELOCITY = 100
 VELOCITY_SCALE_FACTOR = 0.1
+COLLISION_VELOCITY_THRESHOLD = 5
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -19,6 +20,7 @@ YELLOW = (255, 255, 0)
 GREEN = (0, 255, 0)
 GREY = (150, 150, 150)
 COLORS = [RED, BLUE, YELLOW, GREEN, (150, 150, 255), (255, 150, 150)]
+
 
 class Body:
     def __init__(self, x, y, radius, mass, color, initial_velocity_x=0, initial_velocity_y=0):
@@ -40,7 +42,7 @@ class Body:
         acceleration = self.force / self.mass
         self.velocity += acceleration * TIME_STEP
 
-        if self.velocity.length_squared() > MAX_VELOCITY**2:
+        if self.velocity.length_squared() > MAX_VELOCITY ** 2:
             self.velocity.scale_to_length(MAX_VELOCITY)
 
         self.pos += self.velocity * TIME_STEP
@@ -58,23 +60,83 @@ class Body:
                 pass
         pygame.draw.circle(screen, self.color, (int(self.pos.x), int(self.pos.y)), int(self.radius))
 
+    @staticmethod
     def get_radius_for_mass(mass_val):
         return max(3, int(math.sqrt(abs(mass_val) / math.pi) * 2.5))
 
     def __repr__(self):
         return f"Body(pos={self.pos}, mass={self.mass}, vel={self.velocity}, radius={self.radius})"
 
+
 def calculate_gravitational_force(body1, body2):
     direction_vector = body2.pos - body1.pos
     distance_sq = direction_vector.length_squared()
 
-    if distance_sq < MIN_DISTANCE**2:
-        if distance_sq < (body1.radius + body2.radius)**2 / 4:
-            return pygame.math.Vector2(0, 0)
-        distance_sq = MIN_DISTANCE**2
+    if distance_sq < MIN_DISTANCE_FORCE_CAP ** 2:
+        distance_sq = MIN_DISTANCE_FORCE_CAP ** 2
 
     force_magnitude = SCALED_G * (body1.mass * body2.mass) / distance_sq
     return direction_vector.normalize() * force_magnitude
+
+
+def merge_bodies(body1, body2):
+    new_mass = body1.mass + body2.mass
+
+    new_pos_x = (body1.pos.x * body1.mass + body2.pos.x * body2.mass) / new_mass
+    new_pos_y = (body1.pos.y * body1.mass + body2.pos.y * body2.mass) / new_mass
+    new_pos = pygame.math.Vector2(new_pos_x, new_pos_y)
+
+    new_velocity_x = (body1.velocity.x * body1.mass + body2.velocity.x * body2.mass) / new_mass
+    new_velocity_y = (body1.velocity.y * body1.mass + body2.velocity.y * body2.mass) / new_mass
+    new_velocity = pygame.math.Vector2(new_velocity_x, new_velocity_y)
+
+    new_radius = Body.get_radius_for_mass(new_mass)
+
+    new_color = ((body1.color[0] + body2.color[0]) // 2,
+                 (body1.color[1] + body2.color[1]) // 2,
+                 (body1.color[2] + body2.color[2]) // 2)
+
+    merged_body = Body(new_pos.x, new_pos.y, new_radius, new_mass, new_color)
+    merged_body.velocity = new_velocity
+    return merged_body
+
+
+def handle_collision(body1, body2):
+    normal = body2.pos - body1.pos
+    distance = normal.length()
+
+    overlap = (body1.radius + body2.radius) - distance
+    if overlap <= 0:
+        return False
+
+    if distance == 0:
+        normal = pygame.math.Vector2(random.uniform(-1, 1), random.uniform(-1, 1)).normalize()
+    else:
+        normal = normal.normalize()
+
+    body1.pos -= normal * (overlap / 2)
+    body2.pos += normal * (overlap / 2)
+
+    relative_velocity = body2.velocity - body1.velocity
+
+    velocity_along_normal = relative_velocity.dot(normal)
+
+    if velocity_along_normal > 0:
+        return False
+
+    if relative_velocity.length() < COLLISION_VELOCITY_THRESHOLD:
+        return True
+
+    e = 0.8
+
+    j = -(1 + e) * velocity_along_normal / (1 / body1.mass + 1 / body2.mass)
+
+    rmalimpulse = j * no
+    body1.velocity -= impulse / body1.mass
+    body2.velocity += impulse / body2.mass
+
+    return False
+
 
 def main():
     pygame.init()
@@ -83,11 +145,9 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 24)
 
-    bodies = [
-        Body(WIDTH / 2, HEIGHT / 2, Body.get_radius_for_mass(10000), 10000, YELLOW),
-        Body(WIDTH / 2 + 200, HEIGHT / 2, Body.get_radius_for_mass(70), 70, BLUE, initial_velocity_y=-25),
-        Body(WIDTH / 2 - 100, HEIGHT / 2 - 150, Body.get_radius_for_mass(30), 30, GREEN, initial_velocity_x=15, initial_velocity_y=15)
-    ]
+    bodies = []
+    bodies_to_remove = set()
+    bodies_to_add = []
 
     running = True
     paused = False
@@ -112,11 +172,9 @@ def main():
                 if event.key == pygame.K_SPACE:
                     paused = not paused
                 elif event.key == pygame.K_r:
-                    bodies = [
-                        Body(WIDTH / 2, HEIGHT / 2, Body.get_radius_for_mass(10000), 10000, YELLOW),
-                        Body(WIDTH / 2 + 200, HEIGHT / 2, Body.get_radius_for_mass(70), 70, BLUE, initial_velocity_y=-25),
-                        Body(WIDTH / 2 - 100, HEIGHT / 2 - 150, Body.get_radius_for_mass(30), 30, GREEN, initial_velocity_x=15, initial_velocity_y=15)
-                    ]
+                    bodies = []
+                    bodies_to_remove.clear()
+                    bodies_to_add.clear()
                     creating_body_phase = None
                 elif event.key == pygame.K_h:
                     show_help = not show_help
@@ -134,10 +192,9 @@ def main():
                         slingshot_start_pos = event.pos
                         slingshot_end_pos = event.pos
                 elif event.button == 3:
-                    if len(bodies) > 1 and bodies[0].mass == 10000:
-                        bodies = [bodies[0]]
-                    else:
-                        bodies = []
+                    bodies = []
+                    bodies_to_remove.clear()
+                    bodies_to_add.clear()
                     creating_body_phase = None
 
             if event.type == pygame.MOUSEMOTION:
@@ -156,7 +213,7 @@ def main():
                         new_radius = Body.get_radius_for_mass(current_new_body_mass)
                         new_color = random.choice(COLORS)
                         new_body = Body(start_x, start_y, new_radius, current_new_body_mass, new_color, vel_x, vel_y)
-                        bodies.append(new_body)
+                        bodies_to_add.append(new_body)
                     creating_body_phase = None
                     slingshot_start_pos = None
                     slingshot_end_pos = None
@@ -166,20 +223,31 @@ def main():
                 for j in range(i + 1, len(bodies)):
                     body1 = bodies[i]
                     body2 = bodies[j]
-                    force = calculate_gravitational_force(body1, body2)
-                    body1.add_force(force)
-                    body2.add_force(-force)
 
-            temp_bodies = list(bodies)
-            for body in temp_bodies:
-                body.update_position()
+                    if body1 not in bodies_to_remove and body2 not in bodies_to_remove:
+                        distance = body1.pos.distance_to(body2.pos)
+                        if distance < body1.radius + body2.radius:
+                            if handle_collision(body1, body2):
+                                merged_body = merge_bodies(body1, body2)
+                                bodies_to_remove.add(body1)
+                                bodies_to_remove.add(body2)
+                                bodies_to_add.append(merged_body)
+                        else:
+                            force = calculate_gravitational_force(body1, body2)
+                            body1.add_force(force)
+                            body2.add_force(-force)
 
-                is_sun = bodies and body == bodies[0] and body.mass >= 10000
-                if not is_sun and not (-WIDTH * 0.5 < body.pos.x < WIDTH * 1.5 and -HEIGHT * 0.5 < body.pos.y < HEIGHT * 1.5):
-                    try:
-                        bodies.remove(body)
-                    except ValueError:
-                        pass
+            for body in list(bodies):
+                if body not in bodies_to_remove:
+                    body.update_position()
+
+                    if not (-WIDTH * 0.5 < body.pos.x < WIDTH * 1.5 and -HEIGHT * 0.5 < body.pos.y < HEIGHT * 1.5):
+                        bodies_to_remove.add(body)
+
+            bodies = [body for body in bodies if body not in bodies_to_remove]
+            bodies.extend(bodies_to_add)
+            bodies_to_remove.clear()
+            bodies_to_add.clear()
 
         screen.fill(BLACK)
         for body in bodies:
@@ -200,9 +268,9 @@ def main():
                 "Left Click: Set body position",
                 "Hold & Drag Left Mouse: Aim slingshot (drag AWAY from launch direction)",
                 "Release Left Mouse: Launch body",
-                "Right Click: Clear spawned bodies",
+                "Right Click: Clear ALL bodies",
                 "SPACE: Pause/Resume",
-                "R: Reset simulation",
+                "R: Reset simulation (clears all bodies)",
                 "H: Toggle this help",
                 "ESC: Quit",
                 f"Bodies: {len(bodies)}"
@@ -223,6 +291,7 @@ def main():
         clock.tick(FPS)
 
     pygame.quit()
+
 
 if __name__ == "__main__":
     main()
